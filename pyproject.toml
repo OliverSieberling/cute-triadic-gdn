@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cute-triadic-gdn"
+version = "1.0.0"
+description = "CuTe DSL kernels for Triadic linear attention (Triadic Gated DeltaNet) on Hopper GPUs"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.12"
+dependencies = [
+    "torch>=2.8",
+    "nvidia-cutlass-dsl==4.7.1",
+    "cuda-python",
+    "triton",
+]
+
+[tool.setuptools.packages.find]
+include = ["cute_triadic_gdn*"]
