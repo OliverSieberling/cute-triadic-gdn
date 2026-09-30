@@ -142,6 +142,15 @@ def _value_cols(q, E, chunk_starts):
 
 
 def _cute_forward(q, k, v, k2, q2, g, beta, scale, save, chunk_starts=None, token_map=None):
+    if sm_arch(q.device) == "sm100":
+        from ..kernels.sm100_joint_masks import joint_masks_sm100
+        from ..kernels.sm100_joint_fwd import joint_fwd_sm100
+        gc = _scan_cute(g, chunk_offsets=chunk_starts, token_map=token_map)
+        A, Mp, M, Pm = joint_masks_sm100(k, k2, q2, gc, beta, chunk_offsets=chunk_starts, token_map=token_map,
+                                         q=q, scale=scale)
+        result = joint_fwd_sm100(q, k, v, k2, q2, gc, beta, A, Pm, scale=scale, save=save,
+                                 chunk_starts=chunk_starts, token_map=token_map)
+        return result, gc, A, Mp, M
     from ..kernels.sm90_joint_masks import joint_masks
     if k2.shape[-1] in (1, 2, 4):
         from ..kernels.sm90_joint_fwd import joint_fwd
@@ -165,7 +174,10 @@ def _save_masks():
 
 
 def _masks(k, k2, q2, gc, beta, chunk_starts=None, token_map=None):
-    from ..kernels.sm90_joint_masks import joint_masks
+    if sm_arch(k.device) == "sm100":
+        from ..kernels.sm100_joint_masks import joint_masks_sm100 as joint_masks
+    else:
+        from ..kernels.sm90_joint_masks import joint_masks
     return joint_masks(k, k2, q2, gc, beta, chunk_offsets=chunk_starts, token_map=token_map)
 
 
@@ -196,8 +208,12 @@ class _JointCute(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, do):
-        from ..kernels.sm90_joint_bwd_recurrent import joint_bwd_recurrent
-        from ..kernels.sm90_joint_bwd_parallel import joint_bwd_parallel
+        if sm_arch(do.device) == "sm100":
+            from ..kernels.sm100_joint_bwd_recurrent import joint_bwd_recurrent_sm100 as joint_bwd_recurrent
+            from ..kernels.sm100_joint_bwd_parallel import joint_bwd_parallel_sm100 as joint_bwd_parallel
+        else:
+            from ..kernels.sm90_joint_bwd_recurrent import joint_bwd_recurrent
+            from ..kernels.sm90_joint_bwd_parallel import joint_bwd_parallel
         q, k, k2, q2, gc, beta, A, Mp, M, h, W, Vd, chunk_starts, token_map = _unpack_saved(ctx.saved_tensors)
         do = do.contiguous()
         kwargs = {"token_map": token_map, "value_cols": _value_cols(q, k2.shape[-1], chunk_starts)}
@@ -236,13 +252,14 @@ def _check(q, k, v, k2, q2, g, beta, packed=False):
 def chunk_gdn_joint(q, k, v, k2, q2, g, beta, scale=None, cu_seqlens=None, reference=False):
     """Triadic GDN with autograd for all seven tensor inputs.
 
-    Hopper (sm90) runs the CuTe kernels at E = 1/2/4/8/12/16; `reference=True` or any other shape or
-    architecture runs the torch reference pipeline.  With cu_seqlens the inputs are one packed row
+    Hopper (sm90) and Blackwell (sm100/sm103) run the CuTe kernels at E = 1/2/4/8/12/16; `reference=True` or any
+    other shape or architecture runs the torch reference pipeline.  With cu_seqlens the inputs are one packed row
     (1, T, ...): contiguous int32/int64 CUDA offsets that start at 0, end at T and strictly increase;
     document lengths are arbitrary and the state resets at every document start.
     """
     _check(q, k, v, k2, q2, g, beta, packed=cu_seqlens is not None)
-    use_cute = not reference and sm_arch(q.device) == "sm90" and k2.shape[-1] in (1, 2, 4, 8, 12, 16)
+    arch = sm_arch(q.device)
+    use_cute = not reference and k2.shape[-1] in (1, 2, 4, 8, 12, 16) and arch in ("sm90", "sm100")
     chunk_starts = restore = token_map = None
     if cu_seqlens is not None:
         from .joint_packing import pack_documents, prepare_documents

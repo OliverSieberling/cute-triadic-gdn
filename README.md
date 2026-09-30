@@ -5,7 +5,8 @@ CuTe DSL kernels for Triadic Gated DeltaNet, the main model of
 Triadic GDN is the gated delta rule over the joint key `k2 (x) k`, with `E` state slices per head. `E = 1` is
 Gated DeltaNet.
 
-Hopper only (H100, sm90). The kernels compile at first use, there is nothing to build.
+Hopper (H100, sm90) and Blackwell (sm100/sm103, tested on B300). The kernels compile at first use, there is
+nothing to build.
 
 ```
 pip install git+https://github.com/OliverSieberling/cute-triadic-gdn
@@ -41,8 +42,8 @@ o_t  = S^T (q2_t (x) q_t) * scale
 ```
 
 `gdn_joint_call` runs behind `torch.library` custom ops, so it is one node under `torch.compile`.
-`chunk_gdn_joint` is the same function as a plain autograd call. Off Hopper, or with `reference=True`, it runs the
-torch reference instead of the kernels. `conv_split_act_call(x, weight, act_channels, cu_seqlens)` is the causal
+`chunk_gdn_joint` is the same function as a plain autograd call. On other GPUs, or with `reference=True`, it runs
+the torch reference instead of the kernels. `conv_split_act_call(x, weight, act_channels, cu_seqlens)` is the causal
 depthwise convolution (width 4, SiLU on the first `act_channels` channels) that the Triadic layer applies to q, k,
 v, k2 and q2 in one pass. `GJ_SAVE_MASKS=0` makes the backward recompute the chunk masks instead of storing them.
 The numbers stay the same and every layer needs 768 MiB less at 128k tokens.

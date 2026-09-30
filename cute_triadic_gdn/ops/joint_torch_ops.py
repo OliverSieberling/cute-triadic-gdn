@@ -11,8 +11,8 @@ def joint_fwd(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, k2: torch.Tenso
               scale: float, chunk_starts: torch.Tensor | None = None,
               token_map: torch.Tensor | None = None) -> list[torch.Tensor]:
     _check(q, k, v, k2, q2, g, beta, packed=token_map is not None)
-    if torch.cuda.get_device_capability(q.device)[0] != 9 or k2.shape[-1] not in (1, 2, 4, 8, 12, 16):
-        raise ValueError("gdn_joint_call requires sm90 and E=1/2/4/8/12/16")
+    if torch.cuda.get_device_capability(q.device)[0] not in (9, 10) or k2.shape[-1] not in (1, 2, 4, 8, 12, 16):
+        raise ValueError("gdn_joint_call requires sm90 or sm100 and E=1/2/4/8/12/16")
     (o, h, W, Vd), gc, A, Mp, M = _cute_forward(q, k, v, k2, q2, g, beta, scale, True, chunk_starts, token_map)
     return [o, gc, A, Mp, M, h, W, Vd]
 
@@ -81,7 +81,7 @@ register_autograd("cute_triadic_gdn::joint_fwd", _backward, setup_context=_setup
 
 
 def gdn_joint_call(q, k, v, k2, q2, g, beta, scale=None, cu_seqlens=None):
-    """Traceable Triadic GDN for training; sm90, E=1/2/4/8/12/16, D=128.
+    """Traceable Triadic GDN for training; sm90 or sm100, E=1/2/4/8/12/16, D=128.
 
     Same inputs and packed-document contract as `chunk_gdn_joint`.  Document metadata is built on the
     device; inputs and outputs are not repacked.
