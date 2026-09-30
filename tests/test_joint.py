@@ -1,5 +1,6 @@
 """The CuTe kernels against the torch reference pipeline: forward output and the gradients of all seven inputs,
-E in 1/2/4/8, batch rows and packed documents, on one Hopper GPU.  `pytest tests` or `python tests/test_joint.py`."""
+E in 1/2/4/8/12/16, batch rows and packed documents, on one Hopper or Blackwell GPU.  `pytest tests` or
+`python tests/test_joint.py`."""
 import torch
 try:
     import pytest
@@ -43,13 +44,15 @@ def rel(a, b):
 
 
 CASES = [(2, 256, 4, 1, None), (2, 256, 4, 2, None), (2, 256, 4, 4, None), (2, 256, 4, 8, None),
-         (1, 640, 4, 8, [0, 70, 133, 400, 640]), (1, 320, 4, 2, [0, 64, 65, 320]), (1, 512, 4, 4, [0, 512])]
+         (2, 256, 4, 12, None), (2, 256, 4, 16, None),
+         (1, 640, 4, 8, [0, 70, 133, 400, 640]), (1, 320, 4, 2, [0, 64, 65, 320]), (1, 512, 4, 4, [0, 512]),
+         (1, 3000, 8, 16, [0, 17, 900, 901, 1500, 2999, 3000])]
 
 
 @pytest.mark.parametrize("B,T,H,E,docs", CASES)
 def test_against_reference(B, T, H, E, docs):
-    if torch.cuda.get_device_capability()[0] != 9:
-        pytest.skip("the kernels are built for sm90")
+    if torch.cuda.get_device_capability()[0] not in (9, 10):
+        pytest.skip("the kernels are built for sm90 and sm100")
     inputs = make_inputs(B, T, H, E, seed=E * 1000 + T)
     cu = torch.tensor(docs, dtype=torch.int32, device="cuda") if docs else None
     ref = lambda *a, cu_seqlens=None: chunk_gdn_joint(*a, cu_seqlens=cu_seqlens, reference=True)
